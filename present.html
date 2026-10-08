@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#111113">
+<link rel="icon" href="/icon-192.png">
+<title>Typst Present</title>
+<style>
+  :root { color-scheme: dark; --bg:#111113; --panel:#1b1b1f; --fg:#ececf0; --mut:#8c8c96; --acc:#4ea1ff; --err:#ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg);
+               font: 16px system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+  .stage { position: relative; min-height: 0; min-width: 0; background: #000; border-radius: 6px; overflow: hidden; }
+  .stage canvas { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+
+  /* audience window */
+  body.presentation { background: #000; cursor: none; }
+  body.presentation #presenter { display: none; }
+  body.presentation #audience { position: fixed; inset: 0; }
+  body.presentation #audience .stage { position: absolute; inset: 0; border-radius: 0; }
+  body.presenter #audience { display: none; }
+
+  /* presenter window */
+  #presenter { height: 100%; display: grid; gap: 12px; padding: 12px;
+               grid-template-columns: 3fr 2fr; grid-template-rows: minmax(0,1fr) auto; }
+  #cur { grid-row: 1; grid-column: 1; }
+  #side { grid-row: 1; grid-column: 2; display: grid; gap: 12px; grid-template-rows: minmax(0,1fr) minmax(0,1fr); min-height: 0; }
+  #notes { background: var(--panel); border-radius: 6px; padding: 14px 16px; overflow: auto;
+           white-space: pre-wrap; line-height: 1.45; font-size: var(--notes-size, 22px); }
+  #notes:empty::before { content: "No notes for this slide"; color: var(--mut); font-size: 16px; }
+  #bar { grid-column: 1 / 3; display: flex; align-items: center; gap: 18px; padding: 4px 6px; color: var(--mut); }
+  #bar .big { color: var(--fg); font-variant-numeric: tabular-nums; font-size: 28px; font-weight: 600; }
+  #bar .sp { flex: 1; }
+  button { background: var(--panel); color: var(--fg); border: 1px solid #333; border-radius: 6px;
+           padding: 6px 12px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--acc); }
+  #timer { cursor: pointer; }
+  #err { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 10; display: none;
+         background: #2a1416; border: 1px solid var(--err); color: #ffd0d0; border-radius: 6px;
+         padding: 10px 14px; font: 13px ui-monospace, Menlo, monospace; white-space: pre-wrap; max-height: 35vh; overflow: auto; }
+  #msg { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: var(--mut); }
+</style>
+</head>
+<body>
+
+<div id="audience"><div class="stage" id="aStage"><canvas id="aCanvas"></canvas></div></div>
+
+<div id="presenter">
+  <div class="stage" id="cur"><canvas id="cCanvas"></canvas></div>
+  <div id="side">
+    <div class="stage" id="nxt"><canvas id="nCanvas"></canvas></div>
+    <div id="notes"></div>
+  </div>
+  <div id="bar">
+    <span class="big" id="counter">– / –</span>
+    <span class="big" id="timer" title="Click to reset timer">00:00</span>
+    <span id="clock"></span>
+    <span class="sp"></span>
+    <button id="btnNotesMinus" title="Smaller notes">A−</button>
+    <button id="btnNotesPlus" title="Larger notes">A+</button>
+    <button id="btnBlank" title="B">Blank</button>
+    <button id="btnFull" title="F">Fullscreen</button>
+    <button id="btnOpen" title="P">Open presentation window</button>
+  </div>
+</div>
+
+<div id="err"></div>
+<div id="msg">Waiting for first successful build…</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(() => {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+  const role = new URLSearchParams(location.search).get("view") === "presentation" ? "presentation" : "presenter";
+  document.body.classList.add(role);
+  document.title = role === "presentation" ? "Presentation" : "Presenter view";
+
+  const $ = (id) => document.getElementById(id);
+  const bc = new BroadcastChannel("typst-present");
+
+  let pdf = null, version = null, notes = [], page = 1, blank = false;
+  let t0 = null;
+
+  // ---------- rendering ----------
+  async function draw(canvas, container, n) {
+    const token = (canvas._token = (canvas._token || 0) + 1);
+    if (!pdf || n < 1 || n > pdf.numPages) {
+      canvas.style.display = "none";
+      return;
+    }
+    const pg = await pdf.getPage(n);
+    if (token !== canvas._token) return;
+    const base = pg.getViewport({ scale: 1 });
+    const r = container.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const s = Math.min(r.width / base.width, r.height / base.height);
+    const dpr = window.devicePixelRatio || 1;
+    const vp = pg.getViewport({ scale: s * dpr });
+    const off = document.createElement("canvas");   // render off-screen => no flicker
+    off.width = Math.floor(vp.width);
+    off.height = Math.floor(vp.height);
+    await pg.render({ canvasContext: off.getContext("2d"), viewport: vp }).promise;
+    if (token !== canvas._token) return;
+    canvas.width = off.width;
+    canvas.height = off.height;
+    canvas.style.width = off.width / dpr + "px";
+    canvas.style.height = off.height / dpr + "px";
+    canvas.style.display = "block";
+    canvas.getContext("2d").drawImage(off, 0, 0);
+  }
+
+  function refresh() {
+    if (role === "presentation") {
+      $("aCanvas").style.visibility = blank ? "hidden" : "visible";
+      draw($("aCanvas"), $("aStage"), page);
+    } else {
+      draw($("cCanvas"), $("cur"), page);
+      draw($("nCanvas"), $("nxt"), page + 1);
+      $("notes").textContent = notes[page - 1] || "";
+      $("counter").textContent = pdf ? `${page} / ${pdf.numPages}` : "– / –";
+      $("btnBlank").style.borderColor = blank ? "var(--acc)" : "";
+    }
+  }
+
+  // ---------- navigation + sync ----------
+  function go(n, remote = false) {
+    if (!pdf) return;
+    n = Math.max(1, Math.min(pdf.numPages, n));
+    if (n === page) return;
+    page = n;
+    if (!remote) {
+      bc.postMessage({ type: "state", page, blank });
+      if (role === "presenter" && t0 === null) t0 = Date.now();
+    }
+    refresh();
+  }
+  function setBlank(v, remote = false) {
+    blank = v;
+    if (!remote) bc.postMessage({ type: "state", page, blank });
+    refresh();
+  }
+  bc.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === "state") {
+      blank = m.blank;
+      if (pdf) { page = Math.max(1, Math.min(pdf.numPages, m.page)); } else { page = m.page; }
+      refresh();
+    } else if (m.type === "hello") {
+      bc.postMessage({ type: "state", page, blank });
+    }
+  };
+
+  // ---------- loading / live reload ----------
+  async function poll() {
+    try {
+      const st = await (await fetch("/status", { cache: "no-store" })).json();
+      const err = $("err");
+      err.style.display = st.error ? "block" : "none";
+      err.textContent = st.error;
+      $("msg").style.display = st.has_pdf ? "none" : "flex";
+      if (st.has_pdf && st.version !== version) {
+        const doc = await pdfjsLib.getDocument({ url: "/deck.pdf?v=" + st.version }).promise;
+        const nd = await (await fetch("/notes.json?v=" + st.version, { cache: "no-store" })).json();
+        pdf = doc; notes = nd.notes || []; version = st.version;
+        page = Math.max(1, Math.min(pdf.numPages, page));
+        refresh();
+      }
+    } catch (e) { /* server restarting */ }
+    setTimeout(poll, 700);
+  }
+
+  // ---------- input ----------
+  function toggleFullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen().catch(() => {});
+  }
+  function openPresentation() {
+    window.open(location.pathname + "?view=presentation", "typst-present-audience", "popup,width=1280,height=720");
+  }
+  const NEXT = ["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"];
+  const PREV = ["ArrowLeft", "ArrowUp", "PageUp", "Backspace"];
+  addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key;
+    if (NEXT.includes(k)) go(page + 1);
+    else if (PREV.includes(k)) go(page - 1);
+    else if (k === "Home") go(1);
+    else if (k === "End") go(pdf ? pdf.numPages : 1);
+    else if (k === "f" || k === "F") toggleFullscreen();
+    else if (k === "b" || k === "B" || k === ".") setBlank(!blank);
+    else if (k === "p" || k === "P") { if (role === "presenter") openPresentation(); }
+    else return;
+    e.preventDefault();
+  });
+  if (role === "presentation") {
+    addEventListener("click", () => go(page + 1));
+    addEventListener("contextmenu", (e) => { e.preventDefault(); go(page - 1); });
+  }
+
+  let rt;
+  addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(refresh, 80); });
+
+  if (role === "presenter") {
+    $("btnOpen").onclick = openPresentation;
+    $("btnFull").onclick = toggleFullscreen;
+    $("btnBlank").onclick = () => setBlank(!blank);
+    $("timer").onclick = () => { t0 = null; $("timer").textContent = "00:00"; };
+    let size = 22;
+    const applySize = () => document.documentElement.style.setProperty("--notes-size", size + "px");
+    $("btnNotesPlus").onclick = () => { size = Math.min(48, size + 2); applySize(); };
+    $("btnNotesMinus").onclick = () => { size = Math.max(12, size - 2); applySize(); };
+    const pad = (n) => String(n).padStart(2, "0");
+    setInterval(() => {
+      const d = new Date();
+      $("clock").textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      if (t0 !== null) {
+        const s = Math.floor((Date.now() - t0) / 1000);
+        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+        $("timer").textContent = (h ? h + ":" : "") + pad(m) + ":" + pad(s % 60);
+      }
+    }, 500);
+  }
+
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+  poll();
+  bc.postMessage({ type: "hello" });
+})();
+</script>
+</body>
+</html>
