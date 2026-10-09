@@ -13,7 +13,11 @@
   html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg);
                font: 16px system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
   .stage { position: relative; min-height: 0; min-width: 0; background: #000; border-radius: 6px; overflow: hidden; }
-  .stage canvas { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+  .stage canvas { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); transform-origin: center center; }
+  #cur.zoomable { cursor: zoom-in; }
+  #cur.zoomable.panning { cursor: grabbing; }
+  #cur.zoomed { cursor: grab; }
+  #cur.zoomed.panning { cursor: grabbing; }
 
   /* audience window */
   body.presentation { background: #000; cursor: none; }
@@ -41,6 +45,17 @@
          background: #2a1416; border: 1px solid var(--err); color: #ffd0d0; border-radius: 6px;
          padding: 10px 14px; font: 13px ui-monospace, Menlo, monospace; white-space: pre-wrap; max-height: 35vh; overflow: auto; }
   #msg { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: var(--mut); }
+
+  #picker { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center;
+            background: rgba(0,0,0,.6); }
+  #picker .box { width: min(560px, 90vw); max-height: 80vh; display: flex; flex-direction: column;
+                 background: var(--panel); border: 1px solid #333; border-radius: 8px; padding: 14px 16px; gap: 10px; }
+  #pickerPath { color: var(--mut); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #pickerList { overflow: auto; min-height: 0; border-top: 1px solid #333; }
+  #pickerList .row { padding: 8px 6px; cursor: pointer; border-radius: 4px; display: flex; gap: 8px; align-items: center; }
+  #pickerList .row:hover { background: #26262c; }
+  #pickerList .row.up { color: var(--mut); }
+  #pickerErr { color: var(--err); font-size: 13px; display: none; }
 </style>
 </head>
 <body>
@@ -60,14 +75,24 @@
     <span class="sp"></span>
     <button id="btnNotesMinus" title="Smaller notes">A−</button>
     <button id="btnNotesPlus" title="Larger notes">A+</button>
+    <button id="btnZoomReset" title="Reset zoom (0)">Zoom 100%</button>
     <button id="btnBlank" title="B">Blank</button>
     <button id="btnFull" title="F">Fullscreen</button>
     <button id="btnOpen" title="P">Open presentation window</button>
+    <button id="btnFile" title="Open a different file">File…</button>
   </div>
 </div>
 
 <div id="err"></div>
 <div id="msg">Waiting for first successful build…</div>
+
+<div id="picker">
+  <div class="box">
+    <div id="pickerPath"></div>
+    <div id="pickerErr"></div>
+    <div id="pickerList"></div>
+  </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
@@ -84,6 +109,25 @@
 
   let pdf = null, version = null, notes = [], page = 1, blank = false;
   let t0 = null;
+  let knownGen = null, browsePath = null;
+  let zoom = 1, panX = 0, panY = 0; // zoom centered via panX/panY, both in [0,1] fractions of slide size
+
+  const MIN_ZOOM = 1, MAX_ZOOM = 6;
+  function clampPan() {
+    const half = 0.5 / zoom;
+    panX = Math.max(-0.5 + half, Math.min(0.5 - half, panX));
+    panY = Math.max(-0.5 + half, Math.min(0.5 - half, panY));
+  }
+  function applyZoom(canvas) {
+    if (zoom === 1) {
+      canvas.style.transform = "translate(-50%, -50%)";
+    } else {
+      const tx = -panX * canvas.clientWidth * zoom;
+      const ty = -panY * canvas.clientHeight * zoom;
+      canvas.style.transform =
+        `translate(-50%, -50%) translate(${tx}px, ${ty}px) scale(${zoom})`;
+    }
+  }
 
   // ---------- rendering ----------
   async function draw(canvas, container, n) {
@@ -116,41 +160,56 @@
   function refresh() {
     if (role === "presentation") {
       $("aCanvas").style.visibility = blank ? "hidden" : "visible";
-      draw($("aCanvas"), $("aStage"), page);
+      draw($("aCanvas"), $("aStage"), page).then(() => applyZoom($("aCanvas")));
     } else {
-      draw($("cCanvas"), $("cur"), page);
+      draw($("cCanvas"), $("cur"), page).then(() => applyZoom($("cCanvas")));
       draw($("nCanvas"), $("nxt"), page + 1);
       $("notes").textContent = notes[page - 1] || "";
       $("counter").textContent = pdf ? `${page} / ${pdf.numPages}` : "– / –";
       $("btnBlank").style.borderColor = blank ? "var(--acc)" : "";
+      $("btnZoomReset").textContent = `Zoom ${Math.round(zoom * 100)}%`;
+      $("cur").classList.toggle("zoomable", zoom === 1);
+      $("cur").classList.toggle("zoomed", zoom !== 1);
     }
   }
 
   // ---------- navigation + sync ----------
+  function broadcastState() {
+    bc.postMessage({ type: "state", page, blank, zoom, panX, panY });
+  }
   function go(n, remote = false) {
     if (!pdf) return;
     n = Math.max(1, Math.min(pdf.numPages, n));
     if (n === page) return;
     page = n;
     if (!remote) {
-      bc.postMessage({ type: "state", page, blank });
+      zoom = 1; panX = 0; panY = 0; // reset zoom on slide change
+      broadcastState();
       if (role === "presenter" && t0 === null) t0 = Date.now();
     }
     refresh();
   }
   function setBlank(v, remote = false) {
     blank = v;
-    if (!remote) bc.postMessage({ type: "state", page, blank });
+    if (!remote) broadcastState();
+    refresh();
+  }
+  function setZoom(z, px, py, remote = false) {
+    zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
+    panX = px; panY = py;
+    clampPan();
+    if (!remote) broadcastState();
     refresh();
   }
   bc.onmessage = (e) => {
     const m = e.data;
     if (m.type === "state") {
       blank = m.blank;
+      zoom = m.zoom || 1; panX = m.panX || 0; panY = m.panY || 0;
       if (pdf) { page = Math.max(1, Math.min(pdf.numPages, m.page)); } else { page = m.page; }
       refresh();
     } else if (m.type === "hello") {
-      bc.postMessage({ type: "state", page, blank });
+      broadcastState();
     }
   };
 
@@ -158,6 +217,25 @@
   async function poll() {
     try {
       const st = await (await fetch("/status", { cache: "no-store" })).json();
+
+      if (role === "presenter" && st.file === "") {
+        if (knownGen !== null) { knownGen = st.gen; }
+        openPicker();
+        $("err").style.display = "none";
+        $("msg").style.display = "none";
+        setTimeout(poll, 700);
+        return;
+      }
+
+      if (knownGen !== null && st.gen !== knownGen) {
+        page = 1; t0 = null; blank = false; zoom = 1; panX = 0; panY = 0;
+        $("timer").textContent = "00:00";
+        broadcastState();
+        refresh();
+        closePicker();
+      }
+      knownGen = st.gen;
+
       const err = $("err");
       err.style.display = st.error ? "block" : "none";
       err.textContent = st.error;
@@ -181,6 +259,65 @@
   function openPresentation() {
     window.open(location.pathname + "?view=presentation", "typst-present-audience", "popup,width=1280,height=720");
   }
+
+  // ---------- file picker ----------
+  function openPicker() {
+    $("picker").style.display = "flex";
+    browseTo(browsePath);
+  }
+  function closePicker() {
+    $("picker").style.display = "none";
+  }
+  async function browseTo(path) {
+    const pickerErr = $("pickerErr");
+    pickerErr.style.display = "none";
+    try {
+      const url = path ? "/browse?path=" + encodeURIComponent(path) : "/browse";
+      const res = await fetch(url, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) { pickerErr.textContent = data.error || "failed to list directory"; pickerErr.style.display = "block"; return; }
+      browsePath = data.path;
+      $("pickerPath").textContent = data.path;
+      const list = $("pickerList");
+      list.innerHTML = "";
+      if (data.parent) {
+        const up = document.createElement("div");
+        up.className = "row up";
+        up.textContent = "⬆ ..";
+        up.onclick = () => browseTo(data.parent);
+        list.appendChild(up);
+      }
+      for (const e of data.entries) {
+        const row = document.createElement("div");
+        row.className = "row";
+        row.textContent = (e.is_dir ? "📁 " : "📄 ") + e.name;
+        const full = data.path.replace(/\/$/, "") + "/" + e.name;
+        if (e.is_dir) row.onclick = () => browseTo(full);
+        else if (e.selectable) row.onclick = () => openFile(full);
+        else continue;
+        list.appendChild(row);
+      }
+    } catch (e) {
+      pickerErr.textContent = "failed to list directory";
+      pickerErr.style.display = "block";
+    }
+  }
+  async function openFile(path) {
+    const pickerErr = $("pickerErr");
+    try {
+      const res = await fetch("/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      });
+      const data = await res.json();
+      if (!data.ok) { pickerErr.textContent = data.error || "failed to open file"; pickerErr.style.display = "block"; return; }
+      closePicker();
+    } catch (e) {
+      pickerErr.textContent = "failed to open file";
+      pickerErr.style.display = "block";
+    }
+  }
   const NEXT = ["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"];
   const PREV = ["ArrowLeft", "ArrowUp", "PageUp", "Backspace"];
   addEventListener("keydown", (e) => {
@@ -193,6 +330,9 @@
     else if (k === "f" || k === "F") toggleFullscreen();
     else if (k === "b" || k === "B" || k === ".") setBlank(!blank);
     else if (k === "p" || k === "P") { if (role === "presenter") openPresentation(); }
+    else if ((k === "+" || k === "=") && role === "presenter") setZoom(zoom * 1.4, panX, panY);
+    else if (k === "-" && role === "presenter") setZoom(zoom / 1.4, panX, panY);
+    else if (k === "0" && role === "presenter") setZoom(1, 0, 0);
     else return;
     e.preventDefault();
   });
@@ -208,7 +348,45 @@
     $("btnOpen").onclick = openPresentation;
     $("btnFull").onclick = toggleFullscreen;
     $("btnBlank").onclick = () => setBlank(!blank);
+    $("btnFile").onclick = openPicker;
+    $("btnZoomReset").onclick = () => setZoom(1, 0, 0);
     $("timer").onclick = () => { t0 = null; $("timer").textContent = "00:00"; };
+
+    // ---------- zoom (wheel) + pan (drag) on the current-slide preview ----------
+    const cur = $("cur");
+    cur.classList.add("zoomable");
+    cur.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const r = $("cCanvas").getBoundingClientRect();
+      // cursor position as a fraction of the (unscaled) slide, in pan-space
+      const fx = (e.clientX - r.left) / r.width / zoom - 0.5 / zoom;
+      const fy = (e.clientY - r.top) / r.height / zoom - 0.5 / zoom;
+      const cx = panX + fx / zoom, cy = panY + fy / zoom;
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      const nz = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * factor));
+      // keep the point under the cursor fixed while zooming
+      const npx = cx - fx / nz, npy = cy - fy / nz;
+      setZoom(nz, npx, npy);
+    }, { passive: false });
+
+    let dragging = false, dragStart = null;
+    cur.addEventListener("mousedown", (e) => {
+      if (zoom === 1) return;
+      dragging = true;
+      cur.classList.add("panning");
+      dragStart = { x: e.clientX, y: e.clientY, panX, panY };
+    });
+    addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const r = $("cCanvas").getBoundingClientRect();
+      const dx = (e.clientX - dragStart.x) / r.width / zoom;
+      const dy = (e.clientY - dragStart.y) / r.height / zoom;
+      setZoom(zoom, dragStart.panX - dx, dragStart.panY - dy);
+    });
+    addEventListener("mouseup", () => {
+      if (dragging) { dragging = false; cur.classList.remove("panning"); }
+    });
+    cur.addEventListener("dblclick", () => setZoom(1, 0, 0));
     let size = 22;
     const applySize = () => document.documentElement.style.setProperty("--notes-size", size + "px");
     $("btnNotesPlus").onclick = () => { size = Math.min(48, size + 2); applySize(); };

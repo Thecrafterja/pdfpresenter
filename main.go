@@ -29,6 +29,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +53,9 @@ var watchExt = map[string]bool{
 
 type state struct {
 	mu      sync.RWMutex
+	gen     int    // bumped on every file switch (independent of version)
+	src     string // absolute path to current file, "" if none loaded
+	root    string // absolute Typst root for current src, "" if none loaded
 	version int
 	errMsg  string
 	pdf     []byte
@@ -69,6 +73,22 @@ func (s *state) setDeck(pdf []byte, notes []string) {
 	s.errMsg, s.pdf, s.notes = "", pdf, notes
 	s.version++
 	s.mu.Unlock()
+}
+
+// setTarget records a newly picked file/root and bumps gen, clearing stale
+// build output from the previous file.
+func (s *state) setTarget(src, root string) {
+	s.mu.Lock()
+	s.src, s.root = src, root
+	s.gen++
+	s.errMsg, s.pdf, s.notes = "", nil, nil
+	s.mu.Unlock()
+}
+
+func (s *state) target() (src, root string, gen int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.src, s.root, s.gen
 }
 
 // ---------- pdfpc parsing ----------
@@ -188,12 +208,24 @@ func buildPDF(src string, st *state) {
 	st.setDeck(pdf, notes)
 }
 
-func watch(src, root, tmpDir string, st *state) {
-	isTyp := strings.EqualFold(filepath.Ext(src), ".typ")
-	pdfpc := strings.TrimSuffix(src, filepath.Ext(src)) + ".pdfpc"
+func watch(st *state, tmpDir string) {
+	lastGen := -1
+	var src, root, pdfpc string
+	var isTyp bool
 	var last snap
 	first := true
 	for ; ; time.Sleep(500 * time.Millisecond) {
+		curSrc, curRoot, gen := st.target()
+		if curSrc == "" {
+			continue
+		}
+		if gen != lastGen {
+			src, root = curSrc, curRoot
+			isTyp = strings.EqualFold(filepath.Ext(src), ".typ")
+			pdfpc = strings.TrimSuffix(src, filepath.Ext(src)) + ".pdfpc"
+			first = true
+			lastGen = gen
+		}
 		var cur snap
 		if isTyp {
 			cur = snapshot(root, pdfpc)
@@ -250,11 +282,103 @@ func newMux(st *state) *http.ServeMux {
 
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.RLock()
-		body := map[string]any{"version": st.version, "error": st.errMsg, "has_pdf": st.pdf != nil}
+		body := map[string]any{
+			"version": st.version, "gen": st.gen, "file": st.src, "root": st.root,
+			"error": st.errMsg, "has_pdf": st.pdf != nil,
+		}
 		st.mu.RUnlock()
 		noStore(w)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(body)
+	})
+
+	mux.HandleFunc("/browse", func(w http.ResponseWriter, r *http.Request) {
+		noStore(w)
+		w.Header().Set("Content-Type", "application/json")
+		path := r.URL.Query().Get("path")
+		if path == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+				return
+			}
+			path = home
+		}
+		info, err := os.Stat(path)
+		if err != nil || !info.IsDir() {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "not a directory"})
+			return
+		}
+		dirEntries, err := os.ReadDir(path)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+			return
+		}
+		type entry struct {
+			Name       string `json:"name"`
+			IsDir      bool   `json:"is_dir"`
+			Selectable bool   `json:"selectable,omitempty"`
+		}
+		var dirs, files []entry
+		for _, d := range dirEntries {
+			name := d.Name()
+			if strings.HasPrefix(name, ".") {
+				continue
+			}
+			if d.IsDir() {
+				dirs = append(dirs, entry{Name: name, IsDir: true})
+				continue
+			}
+			ext := strings.ToLower(filepath.Ext(name))
+			if ext == ".typ" || ext == ".pdf" {
+				files = append(files, entry{Name: name, Selectable: true})
+			}
+		}
+		sort.Slice(dirs, func(i, j int) bool { return dirs[i].Name < dirs[j].Name })
+		sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
+		entries := append(dirs, files...)
+		parent := filepath.Dir(path)
+		if parent == path {
+			parent = ""
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"path": path, "parent": parent, "entries": entries})
+	})
+
+	mux.HandleFunc("/open", func(w http.ResponseWriter, r *http.Request) {
+		noStore(w)
+		w.Header().Set("Content-Type", "application/json")
+		var body struct {
+			Path string `json:"path"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Path == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "missing path"})
+			return
+		}
+		path, err := filepath.Abs(body.Path)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "not a file"})
+			return
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != ".typ" && ext != ".pdf" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "unsupported file type"})
+			return
+		}
+		root := filepath.Dir(path)
+		st.setTarget(path, root)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "src": path, "root": root})
 	})
 
 	mux.HandleFunc("/notes.json", func(w http.ResponseWriter, r *http.Request) {
@@ -303,27 +427,13 @@ func main() {
 	rootFlag := flag.String("root", "", "Typst project root (default: folder of the source file)")
 	noOpen := flag.Bool("no-open", false, "don't open the browser")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: %s [flags] slides.typ|slides.pdf\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(os.Stderr, "usage: %s [flags] [slides.typ|slides.pdf]\n", filepath.Base(os.Args[0]))
 		flag.PrintDefaults()
 	}
 	flag.Parse()
-	if flag.NArg() != 1 {
+	if flag.NArg() > 1 {
 		flag.Usage()
 		os.Exit(2)
-	}
-
-	src, err := filepath.Abs(flag.Arg(0))
-	if err != nil {
-		log.Fatal(err)
-	}
-	if _, err := os.Stat(src); err != nil {
-		log.Fatalf("%s: %v", src, err)
-	}
-	root := filepath.Dir(src)
-	if *rootFlag != "" {
-		if root, err = filepath.Abs(*rootFlag); err != nil {
-			log.Fatal(err)
-		}
 	}
 
 	tmpDir, err := os.MkdirTemp("", "typst-present-")
@@ -333,7 +443,23 @@ func main() {
 	defer os.RemoveAll(tmpDir)
 
 	st := &state{}
-	go watch(src, root, tmpDir, st)
+	if flag.NArg() == 1 {
+		src, err := filepath.Abs(flag.Arg(0))
+		if err != nil {
+			log.Fatal(err)
+		}
+		if _, err := os.Stat(src); err != nil {
+			log.Fatalf("%s: %v", src, err)
+		}
+		root := filepath.Dir(src)
+		if *rootFlag != "" {
+			if root, err = filepath.Abs(*rootFlag); err != nil {
+				log.Fatal(err)
+			}
+		}
+		st.setTarget(src, root)
+	}
+	go watch(st, tmpDir)
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
 	if err != nil {
