@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#111113">
+<link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/style.css">
+<title>Typst Present</title>
+</head>
+<body>
+
+<div id="audience"><div class="stage" id="aStage"><canvas id="aCanvas"></canvas></div></div>
+
+<div id="presenter">
+  <div class="stage" id="cur"><canvas id="cCanvas"></canvas></div>
+  <div id="side">
+    <div class="stage" id="nxt"><canvas id="nCanvas"></canvas></div>
+    <div id="notes"></div>
+  </div>
+  <div id="bar">
+    <span class="big" id="counter">– / –</span>
+    <span class="big" id="timer">00:00</span>
+    <button id="btnTimerPause" title="Pause/resume timer">⏸</button>
+    <button id="btnTimerReset" title="Reset timer">↺</button>
+    <span id="clock"></span>
+    <span class="sp"></span>
+    <button id="btnNotesMinus" title="Smaller notes">A−</button>
+    <button id="btnNotesPlus" title="Larger notes">A+</button>
+    <button id="btnZoomReset" title="Reset zoom (0)">Zoom 100%</button>
+    <button id="btnBlank" title="B">Blank</button>
+    <button id="btnFull" title="F">Fullscreen</button>
+    <button id="btnOpen" title="P">Open presentation window</button>
+    <button id="btnFile" title="Open a different file">File…</button>
+  </div>
+</div>
+
+<div id="err"></div>
+<div id="msg">Waiting for first successful build…</div>
+
+<div id="picker">
+  <div class="box">
+    <div id="pickerPath"></div>
+    <div id="pickerErr"></div>
+    <div id="pickerList"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,101 +1,3 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#111113">
-<link rel="icon" href="/icon-192.png">
-<title>Typst Present</title>
-<style>
-  :root { color-scheme: dark; --bg:#111113; --panel:#1b1b1f; --fg:#ececf0; --mut:#8c8c96; --acc:#4ea1ff; --err:#ff6b6b; }
-  * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg);
-               font: 16px system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
-  .stage { position: relative; min-height: 0; min-width: 0; background: #000; border-radius: 6px; overflow: hidden; }
-  .stage canvas { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); transform-origin: center center; }
-  #cur.zoomable { cursor: zoom-in; }
-  #cur.zoomable.panning { cursor: grabbing; }
-  #cur.zoomed { cursor: grab; }
-  #cur.zoomed.panning { cursor: grabbing; }
-
-  /* audience window */
-  body.presentation { background: #000; cursor: none; }
-  body.presentation #presenter { display: none; }
-  body.presentation #audience { position: fixed; inset: 0; }
-  body.presentation #audience .stage { position: absolute; inset: 0; border-radius: 0; }
-  body.presenter #audience { display: none; }
-
-  /* presenter window */
-  #presenter { height: 100%; display: grid; gap: 12px; padding: 12px;
-               grid-template-columns: 3fr 2fr; grid-template-rows: minmax(0,1fr) auto; }
-  #cur { grid-row: 1; grid-column: 1; }
-  #side { grid-row: 1; grid-column: 2; display: grid; gap: 12px; grid-template-rows: minmax(0,1fr) minmax(0,1fr); min-height: 0; }
-  #notes { background: var(--panel); border-radius: 6px; padding: 14px 16px; overflow: auto;
-           white-space: pre-wrap; line-height: 1.45; font-size: var(--notes-size, 22px); }
-  #notes:empty::before { content: "No notes for this slide"; color: var(--mut); font-size: 16px; }
-  #bar { grid-column: 1 / 3; display: flex; align-items: center; gap: 18px; padding: 4px 6px; color: var(--mut); }
-  #bar .big { color: var(--fg); font-variant-numeric: tabular-nums; font-size: 28px; font-weight: 600; }
-  #bar .sp { flex: 1; }
-  button { background: var(--panel); color: var(--fg); border: 1px solid #333; border-radius: 6px;
-           padding: 6px 12px; font: inherit; cursor: pointer; }
-  button:hover { border-color: var(--acc); }
-  #timer { cursor: pointer; }
-  #err { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 10; display: none;
-         background: #2a1416; border: 1px solid var(--err); color: #ffd0d0; border-radius: 6px;
-         padding: 10px 14px; font: 13px ui-monospace, Menlo, monospace; white-space: pre-wrap; max-height: 35vh; overflow: auto; }
-  #msg { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: var(--mut); }
-
-  #picker { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center;
-            background: rgba(0,0,0,.6); }
-  #picker .box { width: min(560px, 90vw); max-height: 80vh; display: flex; flex-direction: column;
-                 background: var(--panel); border: 1px solid #333; border-radius: 8px; padding: 14px 16px; gap: 10px; }
-  #pickerPath { color: var(--mut); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #pickerList { overflow: auto; min-height: 0; border-top: 1px solid #333; }
-  #pickerList .row { padding: 8px 6px; cursor: pointer; border-radius: 4px; display: flex; gap: 8px; align-items: center; }
-  #pickerList .row:hover { background: #26262c; }
-  #pickerList .row.up { color: var(--mut); }
-  #pickerErr { color: var(--err); font-size: 13px; display: none; }
-</style>
-</head>
-<body>
-
-<div id="audience"><div class="stage" id="aStage"><canvas id="aCanvas"></canvas></div></div>
-
-<div id="presenter">
-  <div class="stage" id="cur"><canvas id="cCanvas"></canvas></div>
-  <div id="side">
-    <div class="stage" id="nxt"><canvas id="nCanvas"></canvas></div>
-    <div id="notes"></div>
-  </div>
-  <div id="bar">
-    <span class="big" id="counter">– / –</span>
-    <span class="big" id="timer" title="Click to reset timer">00:00</span>
-    <span id="clock"></span>
-    <span class="sp"></span>
-    <button id="btnNotesMinus" title="Smaller notes">A−</button>
-    <button id="btnNotesPlus" title="Larger notes">A+</button>
-    <button id="btnZoomReset" title="Reset zoom (0)">Zoom 100%</button>
-    <button id="btnBlank" title="B">Blank</button>
-    <button id="btnFull" title="F">Fullscreen</button>
-    <button id="btnOpen" title="P">Open presentation window</button>
-    <button id="btnFile" title="Open a different file">File…</button>
-  </div>
-</div>
-
-<div id="err"></div>
-<div id="msg">Waiting for first successful build…</div>
-
-<div id="picker">
-  <div class="box">
-    <div id="pickerPath"></div>
-    <div id="pickerErr"></div>
-    <div id="pickerList"></div>
-  </div>
-</div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script>
 (() => {
   pdfjsLib.GlobalWorkerOptions.workerSrc =
     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
@@ -108,7 +10,7 @@
   const bc = new BroadcastChannel("typst-present");
 
   let pdf = null, version = null, notes = [], page = 1, blank = false;
-  let t0 = null;
+  let t0 = null, pausedElapsed = null;
   let knownGen = null, browsePath = null;
   let zoom = 1, panX = 0, panY = 0; // zoom centered via panX/panY, both in [0,1] fractions of slide size
 
@@ -185,7 +87,7 @@
     if (!remote) {
       zoom = 1; panX = 0; panY = 0; // reset zoom on slide change
       broadcastState();
-      if (role === "presenter" && t0 === null) t0 = Date.now();
+      if (role === "presenter" && t0 === null && pausedElapsed === null) t0 = Date.now();
     }
     refresh();
   }
@@ -228,8 +130,9 @@
       }
 
       if (knownGen !== null && st.gen !== knownGen) {
-        page = 1; t0 = null; blank = false; zoom = 1; panX = 0; panY = 0;
+        page = 1; t0 = null; pausedElapsed = null; blank = false; zoom = 1; panX = 0; panY = 0;
         $("timer").textContent = "00:00";
+        updatePauseButton();
         broadcastState();
         refresh();
         closePicker();
@@ -350,7 +253,24 @@
     $("btnBlank").onclick = () => setBlank(!blank);
     $("btnFile").onclick = openPicker;
     $("btnZoomReset").onclick = () => setZoom(1, 0, 0);
-    $("timer").onclick = () => { t0 = null; $("timer").textContent = "00:00"; };
+    function updatePauseButton() {
+      $("btnTimerPause").textContent = pausedElapsed !== null ? "▶" : "⏸";
+    }
+    $("btnTimerPause").onclick = () => {
+      if (pausedElapsed !== null) { // resume
+        t0 = Date.now() - pausedElapsed;
+        pausedElapsed = null;
+      } else if (t0 !== null) { // pause
+        pausedElapsed = Date.now() - t0;
+        t0 = null;
+      }
+      updatePauseButton();
+    };
+    $("btnTimerReset").onclick = () => {
+      if (pausedElapsed !== null) pausedElapsed = 0;
+      else if (t0 !== null) t0 = Date.now();
+      $("timer").textContent = "00:00";
+    };
 
     // ---------- zoom (wheel) + pan (drag) on the current-slide preview ----------
     const cur = $("cur");
@@ -407,6 +327,3 @@
   poll();
   bc.postMessage({ type: "hello" });
 })();
-</script>
-</body>
-</html>

@@ -15,8 +15,6 @@ package main
 
 import (
 	"embed"
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -25,401 +23,17 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
-	"sort"
-	"strings"
-	"sync"
-	"time"
+
+	"typst-present/internal/server"
 )
 
-//go:embed present.html manifest.webmanifest sw.js icon-192.png icon-512.png
-var assets embed.FS
+//go:embed web
+var webFS embed.FS
 
 func init() {
 	mime.AddExtensionType(".webmanifest", "application/manifest+json")
-}
-
-var watchExt = map[string]bool{
-	".typ": true, ".bib": true, ".csv": true, ".json": true, ".yaml": true, ".yml": true,
-	".toml": true, ".xml": true, ".txt": true, ".md": true, ".png": true, ".jpg": true,
-	".jpeg": true, ".gif": true, ".svg": true, ".webp": true, ".pdf": true, ".pdfpc": true,
-	".ttf": true, ".otf": true,
-}
-
-// ---------- shared state ----------
-
-type state struct {
-	mu      sync.RWMutex
-	gen     int    // bumped on every file switch (independent of version)
-	src     string // absolute path to current file, "" if none loaded
-	root    string // absolute Typst root for current src, "" if none loaded
-	version int
-	errMsg  string
-	pdf     []byte
-	notes   []string
-}
-
-func (s *state) setError(msg string) {
-	s.mu.Lock()
-	s.errMsg = msg
-	s.mu.Unlock()
-}
-
-func (s *state) setDeck(pdf []byte, notes []string) {
-	s.mu.Lock()
-	s.errMsg, s.pdf, s.notes = "", pdf, notes
-	s.version++
-	s.mu.Unlock()
-}
-
-// setTarget records a newly picked file/root and bumps gen, clearing stale
-// build output from the previous file.
-func (s *state) setTarget(src, root string) {
-	s.mu.Lock()
-	s.src, s.root = src, root
-	s.gen++
-	s.errMsg, s.pdf, s.notes = "", nil, nil
-	s.mu.Unlock()
-}
-
-func (s *state) target() (src, root string, gen int) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.src, s.root, s.gen
-}
-
-// ---------- pdfpc parsing ----------
-
-type pdfpcFile struct {
-	Pages []struct {
-		Label any    `json:"label"`
-		Note  string `json:"note"`
-	} `json:"pages"`
-}
-
-// parsePdfpc returns one note per PDF page; overlay subslides inherit the
-// note of the previous page if they share its label.
-func parsePdfpc(data []byte) ([]string, error) {
-	var f pdfpcFile
-	if err := json.Unmarshal(data, &f); err != nil {
-		return nil, err
-	}
-	notes := make([]string, 0, len(f.Pages))
-	prevLabel, prevNote := "", ""
-	for i, p := range f.Pages {
-		note := strings.TrimSpace(p.Note)
-		label := ""
-		if p.Label != nil {
-			label = fmt.Sprint(p.Label)
-		}
-		if note == "" && i > 0 && label != "" && label == prevLabel {
-			note = prevNote
-		}
-		notes = append(notes, note)
-		prevLabel, prevNote = label, note
-	}
-	return notes, nil
-}
-
-// ---------- watching ----------
-
-type snap struct {
-	newest int64
-	count  int
-}
-
-func snapshot(root string, extra ...string) snap {
-	var s snap
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		name := d.Name()
-		if d.IsDir() {
-			if path != root && (strings.HasPrefix(name, ".") || name == "node_modules") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !watchExt[strings.ToLower(filepath.Ext(name))] {
-			return nil
-		}
-		if info, err := d.Info(); err == nil {
-			if t := info.ModTime().UnixNano(); t > s.newest {
-				s.newest = t
-			}
-			s.count++
-		}
-		return nil
-	})
-	for _, p := range extra {
-		if info, err := os.Stat(p); err == nil {
-			if t := info.ModTime().UnixNano(); t > s.newest {
-				s.newest = t
-			}
-			s.count++
-		}
-	}
-	return s
-}
-
-func buildTypst(src, root, tmpDir string, st *state) {
-	out := filepath.Join(tmpDir, "deck.pdf")
-	cmd := exec.Command("typst", "compile", "--root", root, "--format", "pdf", src, out)
-	if msg, err := cmd.CombinedOutput(); err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
-			st.setError("`typst` CLI not found on PATH.")
-		} else {
-			st.setError(strings.TrimSpace(string(msg)))
-		}
-		return
-	}
-	pdf, err := os.ReadFile(out)
-	if err != nil {
-		st.setError(err.Error())
-		return
-	}
-	var notes []string
-	q := exec.Command("typst", "query", "--root", root, src, "<pdfpc-file>", "--field", "value", "--one")
-	if raw, err := q.Output(); err == nil && len(strings.TrimSpace(string(raw))) > 0 {
-		if n, err := parsePdfpc(raw); err == nil {
-			notes = n
-		}
-	}
-	st.setDeck(pdf, notes)
-}
-
-func buildPDF(src string, st *state) {
-	pdf, err := os.ReadFile(src)
-	if err != nil {
-		st.setError(err.Error())
-		return
-	}
-	var notes []string
-	pc := strings.TrimSuffix(src, filepath.Ext(src)) + ".pdfpc"
-	if raw, err := os.ReadFile(pc); err == nil {
-		if n, err := parsePdfpc(raw); err == nil {
-			notes = n
-		}
-	}
-	st.setDeck(pdf, notes)
-}
-
-func watch(st *state, tmpDir string) {
-	lastGen := -1
-	var src, root, pdfpc string
-	var isTyp bool
-	var last snap
-	first := true
-	for ; ; time.Sleep(500 * time.Millisecond) {
-		curSrc, curRoot, gen := st.target()
-		if curSrc == "" {
-			continue
-		}
-		if gen != lastGen {
-			src, root = curSrc, curRoot
-			isTyp = strings.EqualFold(filepath.Ext(src), ".typ")
-			pdfpc = strings.TrimSuffix(src, filepath.Ext(src)) + ".pdfpc"
-			first = true
-			lastGen = gen
-		}
-		var cur snap
-		if isTyp {
-			cur = snapshot(root, pdfpc)
-		} else {
-			cur = snapshot(filepath.Dir(src), pdfpc) // cheap enough for a slides folder
-		}
-		if !first && cur == last {
-			continue
-		}
-		first, last = false, cur
-		log.Println("[build] change detected")
-		if isTyp {
-			buildTypst(src, root, tmpDir, st)
-		} else {
-			buildPDF(src, st)
-		}
-		st.mu.RLock()
-		if st.errMsg != "" {
-			log.Printf("[build] error:\n%s", st.errMsg)
-		}
-		st.mu.RUnlock()
-	}
-}
-
-// ---------- HTTP ----------
-
-func noStore(w http.ResponseWriter) { w.Header().Set("Cache-Control", "no-store") }
-
-func newMux(st *state) *http.ServeMux {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
-			http.NotFound(w, r)
-			return
-		}
-		indexHTML, err := assets.ReadFile("present.html")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		noStore(w)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(indexHTML)
-	})
-
-	assetServer := http.FileServer(http.FS(assets))
-	for _, path := range []string{"/manifest.webmanifest", "/sw.js", "/icon-192.png", "/icon-512.png"} {
-		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-			noStore(w)
-			assetServer.ServeHTTP(w, r)
-		})
-	}
-
-	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
-		st.mu.RLock()
-		body := map[string]any{
-			"version": st.version, "gen": st.gen, "file": st.src, "root": st.root,
-			"error": st.errMsg, "has_pdf": st.pdf != nil,
-		}
-		st.mu.RUnlock()
-		noStore(w)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(body)
-	})
-
-	mux.HandleFunc("/browse", func(w http.ResponseWriter, r *http.Request) {
-		noStore(w)
-		w.Header().Set("Content-Type", "application/json")
-		path := r.URL.Query().Get("path")
-		if path == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
-				return
-			}
-			path = home
-		}
-		info, err := os.Stat(path)
-		if err != nil || !info.IsDir() {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": "not a directory"})
-			return
-		}
-		dirEntries, err := os.ReadDir(path)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
-			return
-		}
-		type entry struct {
-			Name       string `json:"name"`
-			IsDir      bool   `json:"is_dir"`
-			Selectable bool   `json:"selectable,omitempty"`
-		}
-		var dirs, files []entry
-		for _, d := range dirEntries {
-			name := d.Name()
-			if strings.HasPrefix(name, ".") {
-				continue
-			}
-			if d.IsDir() {
-				dirs = append(dirs, entry{Name: name, IsDir: true})
-				continue
-			}
-			ext := strings.ToLower(filepath.Ext(name))
-			if ext == ".typ" || ext == ".pdf" {
-				files = append(files, entry{Name: name, Selectable: true})
-			}
-		}
-		sort.Slice(dirs, func(i, j int) bool { return dirs[i].Name < dirs[j].Name })
-		sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
-		entries := append(dirs, files...)
-		parent := filepath.Dir(path)
-		if parent == path {
-			parent = ""
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"path": path, "parent": parent, "entries": entries})
-	})
-
-	mux.HandleFunc("/open", func(w http.ResponseWriter, r *http.Request) {
-		noStore(w)
-		w.Header().Set("Content-Type", "application/json")
-		var body struct {
-			Path string `json:"path"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Path == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "missing path"})
-			return
-		}
-		path, err := filepath.Abs(body.Path)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-			return
-		}
-		info, err := os.Stat(path)
-		if err != nil || info.IsDir() {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "not a file"})
-			return
-		}
-		ext := strings.ToLower(filepath.Ext(path))
-		if ext != ".typ" && ext != ".pdf" {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "unsupported file type"})
-			return
-		}
-		root := filepath.Dir(path)
-		st.setTarget(path, root)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "src": path, "root": root})
-	})
-
-	mux.HandleFunc("/notes.json", func(w http.ResponseWriter, r *http.Request) {
-		st.mu.RLock()
-		notes := st.notes
-		st.mu.RUnlock()
-		if notes == nil {
-			notes = []string{}
-		}
-		noStore(w)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"notes": notes})
-	})
-
-	mux.HandleFunc("/deck.pdf", func(w http.ResponseWriter, r *http.Request) {
-		st.mu.RLock()
-		pdf := st.pdf
-		st.mu.RUnlock()
-		if pdf == nil {
-			http.Error(w, "no pdf yet", http.StatusNotFound)
-			return
-		}
-		noStore(w)
-		w.Header().Set("Content-Type", "application/pdf")
-		_, _ = w.Write(pdf)
-	})
-
-	return mux
-}
-
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	_ = cmd.Start()
 }
 
 func main() {
@@ -436,13 +50,18 @@ func main() {
 		os.Exit(2)
 	}
 
+	assets, err := fs.Sub(webFS, "web")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	tmpDir, err := os.MkdirTemp("", "typst-present-")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	st := &state{}
+	st := server.NewState()
 	if flag.NArg() == 1 {
 		src, err := filepath.Abs(flag.Arg(0))
 		if err != nil {
@@ -457,9 +76,9 @@ func main() {
 				log.Fatal(err)
 			}
 		}
-		st.setTarget(src, root)
+		st.SetTarget(src, root)
 	}
-	go watch(st, tmpDir)
+	go server.Watch(st, tmpDir)
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
 	if err != nil {
@@ -468,9 +87,9 @@ func main() {
 	url := fmt.Sprintf("http://%s/", ln.Addr())
 	log.Printf("Presenter view: %s   (Ctrl+C to quit)", url)
 	if !*noOpen {
-		openBrowser(url)
+		server.OpenBrowser(url)
 	}
-	go func() { log.Fatal(http.Serve(ln, newMux(st))) }()
+	go func() { log.Fatal(http.Serve(ln, server.NewMux(st, assets))) }()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)

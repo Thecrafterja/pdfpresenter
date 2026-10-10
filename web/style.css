@@ -1,0 +1,48 @@
+:root { color-scheme: dark; --bg:#111113; --panel:#1b1b1f; --fg:#ececf0; --mut:#8c8c96; --acc:#4ea1ff; --err:#ff6b6b; }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg);
+             font: 16px system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+.stage { position: relative; min-height: 0; min-width: 0; background: #000; border-radius: 6px; overflow: hidden; }
+.stage canvas { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); transform-origin: center center; }
+#cur.zoomable { cursor: zoom-in; }
+#cur.zoomable.panning { cursor: grabbing; }
+#cur.zoomed { cursor: grab; }
+#cur.zoomed.panning { cursor: grabbing; }
+
+/* audience window */
+body.presentation { background: #000; cursor: none; }
+body.presentation #presenter { display: none; }
+body.presentation #audience { position: fixed; inset: 0; }
+body.presentation #audience .stage { position: absolute; inset: 0; border-radius: 0; }
+body.presenter #audience { display: none; }
+
+/* presenter window */
+#presenter { height: 100%; display: grid; gap: 12px; padding: 12px;
+             grid-template-columns: 3fr 2fr; grid-template-rows: minmax(0,1fr) auto; }
+#cur { grid-row: 1; grid-column: 1; }
+#side { grid-row: 1; grid-column: 2; display: grid; gap: 12px; grid-template-rows: minmax(0,1fr) minmax(0,1fr); min-height: 0; }
+#notes { background: var(--panel); border-radius: 6px; padding: 14px 16px; overflow: auto;
+         white-space: pre-wrap; line-height: 1.45; font-size: var(--notes-size, 22px); }
+#notes:empty::before { content: "No notes for this slide"; color: var(--mut); font-size: 16px; }
+#bar { grid-column: 1 / 3; display: flex; align-items: center; gap: 18px; padding: 4px 6px; color: var(--mut); }
+#bar .big { color: var(--fg); font-variant-numeric: tabular-nums; font-size: 28px; font-weight: 600; }
+#bar .sp { flex: 1; }
+button { background: var(--panel); color: var(--fg); border: 1px solid #333; border-radius: 6px;
+         padding: 6px 12px; font: inherit; cursor: pointer; }
+button:hover { border-color: var(--acc); }
+#btnTimerPause, #btnTimerReset { padding: 4px 8px; font-size: 14px; line-height: 1; }
+#err { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 10; display: none;
+       background: #2a1416; border: 1px solid var(--err); color: #ffd0d0; border-radius: 6px;
+       padding: 10px 14px; font: 13px ui-monospace, Menlo, monospace; white-space: pre-wrap; max-height: 35vh; overflow: auto; }
+#msg { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: var(--mut); }
+
+#picker { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center;
+          background: rgba(0,0,0,.6); }
+#picker .box { width: min(560px, 90vw); max-height: 80vh; display: flex; flex-direction: column;
+               background: var(--panel); border: 1px solid #333; border-radius: 8px; padding: 14px 16px; gap: 10px; }
+#pickerPath { color: var(--mut); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pickerList { overflow: auto; min-height: 0; border-top: 1px solid #333; }
+#pickerList .row { padding: 8px 6px; cursor: pointer; border-radius: 4px; display: flex; gap: 8px; align-items: center; }
+#pickerList .row:hover { background: #26262c; }
+#pickerList .row.up { color: var(--mut); }
+#pickerErr { color: var(--err); font-size: 13px; display: none; }
