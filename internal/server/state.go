@@ -5,10 +5,10 @@ import "sync"
 // State is the shared, mutex-guarded build state for the currently targeted
 // presentation file.
 type State struct {
-	mu      sync.RWMutex
-	gen     int    // bumped on every file switch (independent of version)
-	src     string // absolute path to current file, "" if none loaded
-	root    string // absolute Typst root for current src, "" if none loaded
+	mu        sync.RWMutex
+	gen       int    // bumped on every file switch (independent of version)
+	src       string // absolute path to current file, "" if none loaded
+	root      string // absolute Typst root for current src, "" if none loaded
 	version   int
 	errMsg    string
 	pdf       []byte
