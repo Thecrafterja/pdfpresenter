@@ -1,7 +1,7 @@
 {
-  "name": "Typst Present",
-  "short_name": "Typst Present",
-  "description": "Presenter view and presentation window for Typst slides",
+  "name": "PDF Presenter",
+  "short_name": "pdfpresenter",
+  "description": "Presenter view and presentation window for PDF slides",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

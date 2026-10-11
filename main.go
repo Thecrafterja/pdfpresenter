@@ -1,9 +1,8 @@
-// typst-present: browser presenter for Typst projects (or plain PDFs).
+// pdfpresenter: browser presenter for Typst projects (or plain PDFs).
 //
 // Usage:
 //
-//	typst-present [flags] slides.typ     # compile + watch a Typst project
-//	typst-present [flags] slides.pdf     # serve a PDF (+ optional slides.pdfpc)
+//	pdfpresenter [flags] slides.pdf     # serve a PDF (+ optional slides.pdfpc + slides.times)
 //
 // Flags must come before the file name:
 //
@@ -55,7 +54,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	tmpDir, err := os.MkdirTemp("", "typst-present-")
+	tmpDir, err := os.MkdirTemp("", "pdfpresenter-")
 	if err != nil {
 		log.Fatal(err)
 	}
