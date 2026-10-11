@@ -31,6 +31,12 @@ button { background: var(--panel); color: var(--fg); border: 1px solid #333; bor
          padding: 6px 12px; font: inherit; cursor: pointer; }
 button:hover { border-color: var(--acc); }
 #btnTimerPause, #btnTimerReset { padding: 4px 8px; font-size: 14px; line-height: 1; }
+#slideTimer { padding: 2px 10px; border-radius: 6px; transition: background-color 0.4s linear; }
+#slideTimer.over { animation: slide-timer-flash 1s step-start infinite; }
+@keyframes slide-timer-flash {
+  0%, 49% { background-color: hsl(0, 70%, 35%); }
+  50%, 100% { background-color: hsl(0, 70%, 55%); }
+}
 #err { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 10; display: none;
        background: #2a1416; border: 1px solid var(--err); color: #ffd0d0; border-radius: 6px;
        padding: 10px 14px; font: 13px ui-monospace, Menlo, monospace; white-space: pre-wrap; max-height: 35vh; overflow: auto; }
@@ -46,3 +52,22 @@ button:hover { border-color: var(--acc); }
 #pickerList .row:hover { background: #26262c; }
 #pickerList .row.up { color: var(--mut); }
 #pickerErr { color: var(--err); font-size: 13px; display: none; }
+
+#history { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center;
+           background: rgba(0,0,0,.6); }
+#history .box { width: min(480px, 90vw); max-height: 80vh; display: flex; flex-direction: column;
+                background: var(--panel); border: 1px solid #333; border-radius: 8px; padding: 14px 16px; gap: 10px; min-height: 0; }
+#historyHead { display: flex; align-items: center; justify-content: space-between; font-weight: 600; flex: none; }
+#historyHead button { padding: 2px 8px; }
+#historyScroll { overflow-y: scroll; min-height: 0; scrollbar-width: thin; scrollbar-color: #4a4a52 var(--panel); }
+#historyScroll::-webkit-scrollbar { width: 10px; }
+#historyScroll::-webkit-scrollbar-track { background: var(--panel); }
+#historyScroll::-webkit-scrollbar-thumb { background: #4a4a52; border-radius: 6px; }
+#historyScroll::-webkit-scrollbar-thumb:hover { background: #5c5c66; }
+#history table { width: 100%; border-collapse: collapse; }
+#history thead th { position: sticky; top: 0; text-align: left; color: var(--mut); font-size: 12px; font-weight: 500;
+                     background: var(--panel); border-bottom: 1px solid #333; padding: 6px 8px; }
+#history tbody td { padding: 6px 8px; font-variant-numeric: tabular-nums; border-bottom: 1px solid #26262c; }
+#history tbody tr.cur { background: #26262c; }
+#history tbody td.over { color: var(--err); }
+#history tbody td.under { color: #7fd97f; }

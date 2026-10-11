@@ -9,10 +9,11 @@ type State struct {
 	gen     int    // bumped on every file switch (independent of version)
 	src     string // absolute path to current file, "" if none loaded
 	root    string // absolute Typst root for current src, "" if none loaded
-	version int
-	errMsg  string
-	pdf     []byte
-	notes   []string
+	version   int
+	errMsg    string
+	pdf       []byte
+	notes     []string
+	durations []int
 }
 
 func NewState() *State {
@@ -25,9 +26,9 @@ func (s *State) SetError(msg string) {
 	s.mu.Unlock()
 }
 
-func (s *State) SetDeck(pdf []byte, notes []string) {
+func (s *State) SetDeck(pdf []byte, notes []string, durations []int) {
 	s.mu.Lock()
-	s.errMsg, s.pdf, s.notes = "", pdf, notes
+	s.errMsg, s.pdf, s.notes, s.durations = "", pdf, notes, durations
 	s.version++
 	s.mu.Unlock()
 }
@@ -38,7 +39,7 @@ func (s *State) SetTarget(src, root string) {
 	s.mu.Lock()
 	s.src, s.root = src, root
 	s.gen++
-	s.errMsg, s.pdf, s.notes = "", nil, nil
+	s.errMsg, s.pdf, s.notes, s.durations = "", nil, nil, nil
 	s.mu.Unlock()
 }
 

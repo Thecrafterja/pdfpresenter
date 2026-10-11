@@ -155,6 +155,18 @@ func NewMux(st *State, assets fs.FS) *http.ServeMux {
 		_ = json.NewEncoder(w).Encode(map[string]any{"notes": notes})
 	})
 
+	mux.HandleFunc("/times.json", func(w http.ResponseWriter, r *http.Request) {
+		st.mu.RLock()
+		durations := st.durations
+		st.mu.RUnlock()
+		if durations == nil {
+			durations = []int{}
+		}
+		noStore(w)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"durations": durations})
+	})
+
 	mux.HandleFunc("/deck.pdf", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.RLock()
 		pdf := st.pdf

@@ -15,7 +15,7 @@ var watchExt = map[string]bool{
 	".typ": true, ".bib": true, ".csv": true, ".json": true, ".yaml": true, ".yml": true,
 	".toml": true, ".xml": true, ".txt": true, ".md": true, ".png": true, ".jpg": true,
 	".jpeg": true, ".gif": true, ".svg": true, ".webp": true, ".pdf": true, ".pdfpc": true,
-	".ttf": true, ".otf": true,
+	".times": true, ".ttf": true, ".otf": true,
 }
 
 type snap struct {
@@ -81,7 +81,14 @@ func buildTypst(src, root, tmpDir string, st *State) {
 			notes = n
 		}
 	}
-	st.SetDeck(pdf, notes)
+	var durations []int
+	tf := strings.TrimSuffix(src, filepath.Ext(src)) + ".times"
+	if raw, err := os.ReadFile(tf); err == nil {
+		if d, err := ParseTimes(raw); err == nil {
+			durations = d
+		}
+	}
+	st.SetDeck(pdf, notes, durations)
 }
 
 func buildPDF(src string, st *State) {
@@ -97,14 +104,21 @@ func buildPDF(src string, st *State) {
 			notes = n
 		}
 	}
-	st.SetDeck(pdf, notes)
+	var durations []int
+	tf := strings.TrimSuffix(src, filepath.Ext(src)) + ".times"
+	if raw, err := os.ReadFile(tf); err == nil {
+		if d, err := ParseTimes(raw); err == nil {
+			durations = d
+		}
+	}
+	st.SetDeck(pdf, notes, durations)
 }
 
 // Watch polls the active target's project directory for changes and
 // triggers rebuilds, writing intermediate Typst output into tmpDir.
 func Watch(st *State, tmpDir string) {
 	lastGen := -1
-	var src, root, pdfpc string
+	var src, root, pdfpc, times string
 	var isTyp bool
 	var last snap
 	first := true
@@ -117,14 +131,15 @@ func Watch(st *State, tmpDir string) {
 			src, root = curSrc, curRoot
 			isTyp = strings.EqualFold(filepath.Ext(src), ".typ")
 			pdfpc = strings.TrimSuffix(src, filepath.Ext(src)) + ".pdfpc"
+			times = strings.TrimSuffix(src, filepath.Ext(src)) + ".times"
 			first = true
 			lastGen = gen
 		}
 		var cur snap
 		if isTyp {
-			cur = snapshot(root, pdfpc)
+			cur = snapshot(root, pdfpc, times)
 		} else {
-			cur = snapshot(filepath.Dir(src), pdfpc) // cheap enough for a slides folder
+			cur = snapshot(filepath.Dir(src), pdfpc, times) // cheap enough for a slides folder
 		}
 		if !first && cur == last {
 			continue

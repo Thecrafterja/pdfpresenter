@@ -9,8 +9,10 @@
   const $ = (id) => document.getElementById(id);
   const bc = new BroadcastChannel("typst-present");
 
-  let pdf = null, version = null, notes = [], page = 1, blank = false;
+  let pdf = null, version = null, notes = [], durations = [], page = 1, blank = false;
   let t0 = null, pausedElapsed = null;
+  let slideT0 = null;
+  let actuals = []; // actuals[i] = seconds spent on slide i+1, last time it was left
   let knownGen = null, browsePath = null;
   let zoom = 1, panX = 0, panY = 0; // zoom centered via panX/panY, both in [0,1] fractions of slide size
 
@@ -83,13 +85,18 @@
     if (!pdf) return;
     n = Math.max(1, Math.min(pdf.numPages, n));
     if (n === page) return;
+    if (role === "presenter" && !remote && slideT0 !== null) {
+      actuals[page - 1] = Math.round((Date.now() - slideT0) / 1000);
+    }
     page = n;
     if (!remote) {
       zoom = 1; panX = 0; panY = 0; // reset zoom on slide change
       broadcastState();
       if (role === "presenter" && t0 === null && pausedElapsed === null) t0 = Date.now();
+      if (role === "presenter") slideT0 = Date.now();
     }
     refresh();
+    if (role === "presenter") refreshHistory();
   }
   function setBlank(v, remote = false) {
     blank = v;
@@ -130,12 +137,14 @@
       }
 
       if (knownGen !== null && st.gen !== knownGen) {
-        page = 1; t0 = null; pausedElapsed = null; blank = false; zoom = 1; panX = 0; panY = 0;
+        page = 1; t0 = null; pausedElapsed = null; slideT0 = null; blank = false; zoom = 1; panX = 0; panY = 0;
+        actuals = [];
         $("timer").textContent = "00:00";
         updatePauseButton();
         broadcastState();
         refresh();
         closePicker();
+        if (role === "presenter") refreshHistory();
       }
       knownGen = st.gen;
 
@@ -146,8 +155,10 @@
       if (st.has_pdf && st.version !== version) {
         const doc = await pdfjsLib.getDocument({ url: "/deck.pdf?v=" + st.version }).promise;
         const nd = await (await fetch("/notes.json?v=" + st.version, { cache: "no-store" })).json();
-        pdf = doc; notes = nd.notes || []; version = st.version;
+        const td = await (await fetch("/times.json?v=" + st.version, { cache: "no-store" })).json();
+        pdf = doc; notes = nd.notes || []; durations = td.durations || []; version = st.version;
         page = Math.max(1, Math.min(pdf.numPages, page));
+        if (role === "presenter" && slideT0 === null) slideT0 = Date.now();
         refresh();
       }
     } catch (e) { /* server restarting */ }
@@ -253,6 +264,35 @@
     $("btnBlank").onclick = () => setBlank(!blank);
     $("btnFile").onclick = openPicker;
     $("btnZoomReset").onclick = () => setZoom(1, 0, 0);
+    $("btnHistory").onclick = () => { $("history").style.display = "flex"; refreshHistory(); };
+    $("historyClose").onclick = () => { $("history").style.display = "none"; };
+    $("history").addEventListener("click", (e) => { if (e.target.id === "history") $("history").style.display = "none"; });
+    function fmtDur(s) {
+      if (s == null) return "–";
+      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+      return (h ? h + ":" : "") + pad(m) + ":" + pad(s % 60);
+    }
+    function refreshHistory() {
+      if ($("history").style.display !== "flex") return;
+      const body = $("historyBody");
+      body.innerHTML = "";
+      const n = pdf ? pdf.numPages : 0;
+      for (let i = 0; i < n; i++) {
+        const tr = document.createElement("tr");
+        if (i + 1 === page) tr.classList.add("cur");
+        const budget = durations[i] || 0;
+        const actual = actuals[i];
+        const td = (txt) => { const c = document.createElement("td"); c.textContent = txt; return c; };
+        tr.appendChild(td(String(i + 1)));
+        tr.appendChild(td(budget ? fmtDur(budget) : "–"));
+        tr.appendChild(td(fmtDur(actual)));
+        if (actual != null && budget > 0) {
+          const over = actual > budget;
+          tr.lastChild.classList.add(over ? "over" : "under");
+        }
+        body.appendChild(tr);
+      }
+    }
     function updatePauseButton() {
       $("btnTimerPause").textContent = pausedElapsed !== null ? "▶" : "⏸";
     }
@@ -312,6 +352,13 @@
     $("btnNotesPlus").onclick = () => { size = Math.min(48, size + 2); applySize(); };
     $("btnNotesMinus").onclick = () => { size = Math.max(12, size - 2); applySize(); };
     const pad = (n) => String(n).padStart(2, "0");
+    function colorForRatio(ratio) {
+      // 0 -> green (120deg), 0.75 -> yellow (60deg), >=1 -> red (0deg)
+      let hue;
+      if (ratio <= 0.75) hue = 120 - (ratio / 0.75) * 60;
+      else hue = 60 - (Math.min(ratio, 1) - 0.75) / 0.25 * 60;
+      return `hsl(${Math.max(0, Math.min(120, hue))}, 70%, 35%)`;
+    }
     setInterval(() => {
       const d = new Date();
       $("clock").textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -319,6 +366,23 @@
         const s = Math.floor((Date.now() - t0) / 1000);
         const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
         $("timer").textContent = (h ? h + ":" : "") + pad(m) + ":" + pad(s % 60);
+      }
+      const slideTimer = $("slideTimer");
+      if (slideT0 !== null) {
+        const es = Math.floor((Date.now() - slideT0) / 1000);
+        const h = Math.floor(es / 3600), m = Math.floor((es % 3600) / 60);
+        slideTimer.textContent = (h ? h + ":" : "") + pad(m) + ":" + pad(es % 60);
+        const limit = durations[page - 1] || 0;
+        if (limit > 0 && es >= limit) {
+          slideTimer.classList.add("over");
+          slideTimer.style.backgroundColor = "";
+        } else if (limit > 0) {
+          slideTimer.classList.remove("over");
+          slideTimer.style.backgroundColor = colorForRatio(es / limit);
+        } else {
+          slideTimer.classList.remove("over");
+          slideTimer.style.backgroundColor = "";
+        }
       }
     }, 500);
   }
