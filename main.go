@@ -25,7 +25,7 @@ import (
 	"os/signal"
 	"path/filepath"
 
-	"typst-present/internal/server"
+	"github.com/Thecrafterja/pdfpresenter/internal/server"
 )
 
 //go:embed web
