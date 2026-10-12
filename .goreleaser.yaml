@@ -1,0 +1,68 @@
+version: 2
+
+project_name: presenter
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: presenter
+    binary: presenter
+    main: .
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: presenter
+    ids:
+      - presenter
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ .ShortCommit }}-dev"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+homebrew_casks:
+  - name: presenter
+    ids:
+      - presenter
+    binaries:
+      - presenter
+    repository:
+      owner: Thecrafterja
+      name: homebrew-presenter
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/Thecrafterja/pdfpresenter"
+    description: "Browser-based presenter view for Typst/PDF slides"
+
+release:
+  github:
+    owner: Thecrafterja
+    name: pdfpresenter

@@ -31,6 +31,9 @@ import (
 //go:embed web
 var webFS embed.FS
 
+// version is set via -ldflags "-X main.version=..." at release build time.
+var version = "dev"
+
 func init() {
 	mime.AddExtensionType(".webmanifest", "application/manifest+json")
 }
@@ -39,11 +42,16 @@ func main() {
 	port := flag.Int("port", 8765, "HTTP port")
 	rootFlag := flag.String("root", "", "Typst project root (default: folder of the source file)")
 	noOpen := flag.Bool("no-open", false, "don't open the browser")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s [flags] [slides.typ|slides.pdf]\n", filepath.Base(os.Args[0]))
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 	if flag.NArg() > 1 {
 		flag.Usage()
 		os.Exit(2)
