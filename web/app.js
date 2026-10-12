@@ -16,6 +16,10 @@
   let knownGen = null, browsePath = null;
   let zoom = 1, panX = 0, panY = 0; // zoom centered via panX/panY, both in [0,1] fractions of slide size
 
+  const LAYOUTS = ["standard", "notes", "notes-top"];
+  const LAYOUT_LABELS = { standard: "Standard", notes: "Notes", "notes-top": "Notes on top" };
+  let layout = LAYOUTS.includes(localStorage.getItem("ppLayout")) ? localStorage.getItem("ppLayout") : "standard";
+
   const MIN_ZOOM = 1, MAX_ZOOM = 6;
   function clampPan() {
     const half = 0.5 / zoom;
@@ -173,6 +177,28 @@
   function openPresentation() {
     window.open(location.pathname + "?view=presentation", "typst-present-audience", "popup,width=1280,height=720");
   }
+  function applyLayout() {
+    $("presenter").className = `layout-${layout}`;
+    $("btnLayout").textContent = `Layout: ${LAYOUT_LABELS[layout]}`;
+    refresh();
+  }
+  function cycleLayout() {
+    layout = LAYOUTS[(LAYOUTS.indexOf(layout) + 1) % LAYOUTS.length];
+    localStorage.setItem("ppLayout", layout);
+    applyLayout();
+  }
+  function closeMenus() {
+    document.querySelectorAll(".menu.open").forEach((m) => m.classList.remove("open"));
+  }
+  function setupMenu(menuId, triggerId) {
+    const menu = $(menuId);
+    $(triggerId).onclick = (e) => {
+      e.stopPropagation();
+      const willOpen = !menu.classList.contains("open");
+      closeMenus();
+      if (willOpen) menu.classList.add("open");
+    };
+  }
 
   // ---------- file picker ----------
   function openPicker() {
@@ -244,6 +270,7 @@
     else if (k === "f" || k === "F") toggleFullscreen();
     else if (k === "b" || k === "B" || k === ".") setBlank(!blank);
     else if (k === "p" || k === "P") { if (role === "presenter") openPresentation(); }
+    else if ((k === "l" || k === "L") && role === "presenter") cycleLayout();
     else if ((k === "+" || k === "=") && role === "presenter") setZoom(zoom * 1.4, panX, panY);
     else if (k === "-" && role === "presenter") setZoom(zoom / 1.4, panX, panY);
     else if (k === "0" && role === "presenter") setZoom(1, 0, 0);
@@ -264,6 +291,12 @@
     $("btnBlank").onclick = () => setBlank(!blank);
     $("btnFile").onclick = openPicker;
     $("btnZoomReset").onclick = () => setZoom(1, 0, 0);
+    $("btnLayout").onclick = cycleLayout;
+    applyLayout();
+    setupMenu("menuDisplay", "btnDisplayMenu");
+    setupMenu("menuFile", "btnFileMenu");
+    addEventListener("click", closeMenus);
+    addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
     $("btnHistory").onclick = () => { $("history").style.display = "flex"; refreshHistory(); };
     $("historyClose").onclick = () => { $("history").style.display = "none"; };
     $("history").addEventListener("click", (e) => { if (e.target.id === "history") $("history").style.display = "none"; });
@@ -349,8 +382,8 @@
     cur.addEventListener("dblclick", () => setZoom(1, 0, 0));
     let size = 22;
     const applySize = () => document.documentElement.style.setProperty("--notes-size", size + "px");
-    $("btnNotesPlus").onclick = () => { size = Math.min(48, size + 2); applySize(); };
-    $("btnNotesMinus").onclick = () => { size = Math.max(12, size - 2); applySize(); };
+    $("btnNotesPlus").onclick = (e) => { e.stopPropagation(); size = Math.min(48, size + 2); applySize(); };
+    $("btnNotesMinus").onclick = (e) => { e.stopPropagation(); size = Math.max(12, size - 2); applySize(); };
     const pad = (n) => String(n).padStart(2, "0");
     function colorForRatio(ratio) {
       // 0 -> green (120deg), 0.75 -> yellow (60deg), >=1 -> red (0deg)

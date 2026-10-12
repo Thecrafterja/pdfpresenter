@@ -15,10 +15,8 @@
 
 <div id="presenter">
   <div class="stage" id="cur"><canvas id="cCanvas"></canvas></div>
-  <div id="side">
-    <div class="stage" id="nxt"><canvas id="nCanvas"></canvas></div>
-    <div id="notes"></div>
-  </div>
+  <div class="stage" id="nxt"><canvas id="nCanvas"></canvas></div>
+  <div id="notes"></div>
   <div id="bar">
     <span class="big" id="counter">– / –</span>
     <span class="big" id="timer">00:00</span>
@@ -27,14 +25,30 @@
     <span class="big" id="slideTimer">00:00</span>
     <span id="clock"></span>
     <span class="sp"></span>
-    <button id="btnNotesMinus" title="Smaller notes">A−</button>
-    <button id="btnNotesPlus" title="Larger notes">A+</button>
-    <button id="btnZoomReset" title="Reset zoom (0)">Zoom 100%</button>
     <button id="btnBlank" title="B">Blank</button>
     <button id="btnFull" title="F">Fullscreen</button>
-    <button id="btnOpen" title="P">Open presentation window</button>
-    <button id="btnFile" title="Open a different file">File…</button>
-    <button id="btnHistory" title="Show time spent per slide">History</button>
+
+    <div class="menu" id="menuDisplay">
+      <button id="btnDisplayMenu" class="menuTrigger">Display ▾</button>
+      <div class="menuList">
+        <div class="menuRow">
+          <span>Notes size</span>
+          <button id="btnNotesMinus" title="Smaller notes">A−</button>
+          <button id="btnNotesPlus" title="Larger notes">A+</button>
+        </div>
+        <button id="btnZoomReset" title="Reset zoom (0)">Zoom 100%</button>
+        <button id="btnLayout" title="L">Layout: Standard</button>
+      </div>
+    </div>
+
+    <div class="menu" id="menuFile">
+      <button id="btnFileMenu" class="menuTrigger">File ▾</button>
+      <div class="menuList">
+        <button id="btnOpen" title="P">Open presentation window</button>
+        <button id="btnFile" title="Open a different file">File…</button>
+        <button id="btnHistory" title="Show time spent per slide">History</button>
+      </div>
+    </div>
   </div>
 </div>
 
