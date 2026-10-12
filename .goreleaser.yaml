@@ -61,6 +61,11 @@ homebrew_casks:
     directory: Casks
     homepage: "https://github.com/Thecrafterja/pdfpresenter"
     description: "Browser-based presenter view for Typst/PDF slides"
+    caveats: |
+      macOS Gatekeeper will block the first run of this unsigned binary with
+      "Apple could not verify 'presenter' is free of malware". To allow it:
+
+        xattr -d com.apple.quarantine "$(brew --prefix)/bin/presenter"
 
 release:
   github:

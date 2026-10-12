@@ -7,6 +7,12 @@ PDF Presenter is a small CLI tool that is build for presenting pdfs, especially 
 ```sh
 brew install Thecrafterja/presenter/presenter
 ```
+The binary isn't signed/notarized with an Apple Developer ID, so Gatekeeper
+blocks the first run with "Apple could not verify 'presenter' is free of
+malware". Clear the quarantine flag once after install:
+```sh
+xattr -d com.apple.quarantine "$(brew --prefix)/bin/presenter"
+```
 
 ### Manual download
 Download the binary matching your architecture from [GitHub Releases](https://github.com/Thecrafterja/pdfpresenter/releases), and then execute it via `./presenter <slides-pdf>`.
