@@ -15,6 +15,12 @@ body.presentation #presenter { display: none; }
 body.presentation #audience { position: fixed; inset: 0; }
 body.presentation #audience .stage { position: absolute; inset: 0; border-radius: 0; }
 body.presenter #audience { display: none; }
+#btnAudienceFull { display: none; }
+body.presentation #btnAudienceFull {
+  display: block; position: absolute; top: 16px; right: 16px; z-index: 20;
+  opacity: 0; transition: opacity 0.3s; cursor: pointer;
+}
+body.presentation #audience.show-controls #btnAudienceFull { opacity: 1; }
 
 /* presenter window */
 #presenter { height: 100%; display: grid; gap: 12px; padding: 12px; min-height: 0; }

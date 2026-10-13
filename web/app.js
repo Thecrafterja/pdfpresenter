@@ -289,8 +289,15 @@
     e.preventDefault();
   });
   if (role === "presentation") {
-    addEventListener("click", () => go(page + 1));
+    addEventListener("click", (e) => { if (e.target.id !== "btnAudienceFull") go(page + 1); });
     addEventListener("contextmenu", (e) => { e.preventDefault(); go(page - 1); });
+    $("btnAudienceFull").onclick = (e) => { e.stopPropagation(); toggleFullscreen(); };
+    let controlsTimer;
+    addEventListener("mousemove", () => {
+      $("audience").classList.add("show-controls");
+      clearTimeout(controlsTimer);
+      controlsTimer = setTimeout(() => $("audience").classList.remove("show-controls"), 1500);
+    });
   }
 
   let rt;
