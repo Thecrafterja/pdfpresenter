@@ -290,13 +290,15 @@
     $("btnFull").onclick = toggleFullscreen;
     $("btnBlank").onclick = () => setBlank(!blank);
     $("btnFile").onclick = openPicker;
+    $("pickerClose").onclick = closePicker;
+    $("picker").addEventListener("click", (e) => { if (e.target.id === "picker") closePicker(); });
     $("btnZoomReset").onclick = () => setZoom(1, 0, 0);
     $("btnLayout").onclick = cycleLayout;
     applyLayout();
     setupMenu("menuDisplay", "btnDisplayMenu");
     setupMenu("menuFile", "btnFileMenu");
     addEventListener("click", closeMenus);
-    addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
+    addEventListener("keydown", (e) => { if (e.key === "Escape") { closeMenus(); closePicker(); } });
     $("btnHistory").onclick = () => { $("history").style.display = "flex"; refreshHistory(); };
     $("historyClose").onclick = () => { $("history").style.display = "none"; };
     $("history").addEventListener("click", (e) => { if (e.target.id === "history") $("history").style.display = "none"; });

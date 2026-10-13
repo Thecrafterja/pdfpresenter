@@ -72,6 +72,8 @@ button:hover { border-color: var(--acc); }
           background: rgba(0,0,0,.6); }
 #picker .box { width: min(560px, 90vw); max-height: 80vh; display: flex; flex-direction: column;
                background: var(--panel); border: 1px solid #333; border-radius: 8px; padding: 14px 16px; gap: 10px; }
+#pickerHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: none; }
+#pickerHead button { padding: 2px 8px; flex: none; }
 #pickerPath { color: var(--mut); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #pickerList { overflow: auto; min-height: 0; border-top: 1px solid #333; }
 #pickerList .row { padding: 8px 6px; cursor: pointer; border-radius: 4px; display: flex; gap: 8px; align-items: center; }
