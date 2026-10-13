@@ -219,6 +219,43 @@
   function closePicker() {
     $("picker").style.display = "none";
   }
+
+  // ---------- slide overview ----------
+  async function openOverview() {
+    if (!pdf) return;
+    $("overview").style.display = "flex";
+    const grid = $("overviewGrid");
+    grid.innerHTML = "";
+    const token = (grid._token = (grid._token || 0) + 1);
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const item = document.createElement("div");
+      item.className = "overviewSlide" + (n === page ? " cur" : "");
+      const canvas = document.createElement("canvas");
+      const num = document.createElement("div");
+      num.className = "num";
+      num.textContent = n;
+      item.appendChild(canvas);
+      item.appendChild(num);
+      item.onclick = () => { go(n); closeOverview(); };
+      grid.appendChild(item);
+      renderThumb(canvas, n, token, grid);
+    }
+  }
+  async function renderThumb(canvas, n, token, grid) {
+    const pg = await pdf.getPage(n);
+    if (token !== grid._token) return;
+    const vp = pg.getViewport({ scale: 1 });
+    const dpr = window.devicePixelRatio || 1;
+    const targetWidth = 320;
+    const scale = (targetWidth / vp.width) * dpr;
+    const svp = pg.getViewport({ scale });
+    canvas.width = Math.floor(svp.width);
+    canvas.height = Math.floor(svp.height);
+    await pg.render({ canvasContext: canvas.getContext("2d"), viewport: svp }).promise;
+  }
+  function closeOverview() {
+    $("overview").style.display = "none";
+  }
   async function browseTo(path) {
     const pickerErr = $("pickerErr");
     pickerErr.style.display = "none";
@@ -282,6 +319,7 @@
     else if (k === "b" || k === "B" || k === ".") setBlank(!blank);
     else if (k === "p" || k === "P") { if (role === "presenter") openPresentation(); }
     else if ((k === "l" || k === "L") && role === "presenter") cycleLayout();
+    else if ((k === "o" || k === "O") && role === "presenter") openOverview();
     else if ((k === "+" || k === "=") && role === "presenter") setZoom(zoom * 1.4, panX, panY);
     else if (k === "-" && role === "presenter") setZoom(zoom / 1.4, panX, panY);
     else if (k === "0" && role === "presenter") setZoom(1, 0, 0);
@@ -316,10 +354,13 @@
     setupMenu("menuDisplay", "btnDisplayMenu");
     setupMenu("menuFile", "btnFileMenu");
     addEventListener("click", closeMenus);
-    addEventListener("keydown", (e) => { if (e.key === "Escape") { closeMenus(); closePicker(); } });
+    addEventListener("keydown", (e) => { if (e.key === "Escape") { closeMenus(); closePicker(); closeOverview(); } });
     $("btnHistory").onclick = () => { $("history").style.display = "flex"; refreshHistory(); };
     $("historyClose").onclick = () => { $("history").style.display = "none"; };
     $("history").addEventListener("click", (e) => { if (e.target.id === "history") $("history").style.display = "none"; });
+    $("btnOverview").onclick = openOverview;
+    $("overviewClose").onclick = closeOverview;
+    $("overview").addEventListener("click", (e) => { if (e.target.id === "overview") closeOverview(); });
     function fmtDur(s) {
       if (s == null) return "–";
       const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);

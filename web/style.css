@@ -105,3 +105,23 @@ button:hover { border-color: var(--acc); }
 #history tbody tr.cur { background: #26262c; }
 #history tbody td.over { color: var(--err); }
 #history tbody td.under { color: #7fd97f; }
+
+#overview { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center;
+            background: rgba(0,0,0,.6); }
+#overview .box { width: min(1100px, 92vw); height: min(720px, 85vh); display: flex; flex-direction: column;
+                 background: var(--panel); border: 1px solid #333; border-radius: 8px; padding: 14px 16px; gap: 10px; }
+#overviewHead { display: flex; align-items: center; justify-content: space-between; font-weight: 600; flex: none; }
+#overviewHead button { padding: 2px 8px; }
+#overviewGrid { overflow-y: auto; min-height: 0; display: grid; gap: 14px;
+                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); align-content: start;
+                scrollbar-width: thin; scrollbar-color: #4a4a52 var(--panel); }
+#overviewGrid::-webkit-scrollbar { width: 10px; }
+#overviewGrid::-webkit-scrollbar-track { background: var(--panel); }
+#overviewGrid::-webkit-scrollbar-thumb { background: #4a4a52; border-radius: 6px; }
+#overviewGrid::-webkit-scrollbar-thumb:hover { background: #5c5c66; }
+.overviewSlide { cursor: pointer; border: 2px solid transparent; border-radius: 6px; padding: 4px;
+                  display: flex; flex-direction: column; gap: 4px; }
+.overviewSlide:hover { background: #26262c; }
+.overviewSlide.cur { border-color: var(--acc); }
+.overviewSlide canvas { width: 100%; display: block; border-radius: 4px; background: #000; }
+.overviewSlide .num { text-align: center; color: var(--mut); font-size: 13px; font-variant-numeric: tabular-nums; }
