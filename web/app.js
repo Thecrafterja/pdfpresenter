@@ -11,7 +11,7 @@
 
   let pdf = null, version = null, notes = [], durations = [], page = 1, blank = false;
   let t0 = null, pausedElapsed = null;
-  let slideT0 = null;
+  let slideT0 = null, pausedSlideElapsed = null;
   let actuals = []; // actuals[i] = seconds spent on slide i+1, last time it was left
   let knownGen = null, browsePath = null;
   let zoom = 1, panX = 0, panY = 0; // zoom centered via panX/panY, both in [0,1] fractions of slide size
@@ -97,7 +97,17 @@
       zoom = 1; panX = 0; panY = 0; // reset zoom on slide change
       broadcastState();
       if (role === "presenter" && t0 === null && pausedElapsed === null) t0 = Date.now();
-      if (role === "presenter") slideT0 = Date.now();
+      if (role === "presenter") {
+        if (pausedElapsed !== null) {
+          pausedSlideElapsed = 0;
+          const slideTimer = $("slideTimer");
+          slideTimer.textContent = "00:00";
+          slideTimer.classList.remove("over");
+          slideTimer.style.backgroundColor = "";
+        } else {
+          slideT0 = Date.now();
+        }
+      }
     }
     refresh();
     if (role === "presenter") refreshHistory();
@@ -141,7 +151,7 @@
       }
 
       if (knownGen !== null && st.gen !== knownGen) {
-        page = 1; t0 = null; pausedElapsed = null; slideT0 = null; blank = false; zoom = 1; panX = 0; panY = 0;
+        page = 1; t0 = null; pausedElapsed = null; slideT0 = null; pausedSlideElapsed = null; blank = false; zoom = 1; panX = 0; panY = 0;
         actuals = [];
         $("timer").textContent = "00:00";
         updatePauseButton();
@@ -162,6 +172,7 @@
         const td = await (await fetch("/times.json?v=" + st.version, { cache: "no-store" })).json();
         pdf = doc; notes = nd.notes || []; durations = td.durations || []; version = st.version;
         page = Math.max(1, Math.min(pdf.numPages, page));
+        if (role === "presenter" && t0 === null && pausedElapsed === null) t0 = Date.now();
         if (role === "presenter" && slideT0 === null) slideT0 = Date.now();
         refresh();
       }
@@ -335,15 +346,25 @@
       if (pausedElapsed !== null) { // resume
         t0 = Date.now() - pausedElapsed;
         pausedElapsed = null;
+        if (pausedSlideElapsed !== null) {
+          slideT0 = Date.now() - pausedSlideElapsed;
+          pausedSlideElapsed = null;
+        }
       } else if (t0 !== null) { // pause
         pausedElapsed = Date.now() - t0;
         t0 = null;
+        if (slideT0 !== null) {
+          pausedSlideElapsed = Date.now() - slideT0;
+          slideT0 = null;
+        }
       }
       updatePauseButton();
     };
     $("btnTimerReset").onclick = () => {
       if (pausedElapsed !== null) pausedElapsed = 0;
       else if (t0 !== null) t0 = Date.now();
+      if (pausedSlideElapsed !== null) pausedSlideElapsed = 0;
+      else if (slideT0 !== null) slideT0 = Date.now();
       $("timer").textContent = "00:00";
     };
 
