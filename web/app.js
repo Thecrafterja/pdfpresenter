@@ -20,6 +20,13 @@
   const LAYOUT_LABELS = { standard: "Standard", notes: "Notes", "notes-top": "Notes on top" };
   let layout = LAYOUTS.includes(localStorage.getItem("ppLayout")) ? localStorage.getItem("ppLayout") : "standard";
 
+  const pad = (n) => String(n).padStart(2, "0");
+  function fmtDur(s) {
+    if (s == null) return "–";
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    return (h ? h + ":" : "") + pad(m) + ":" + pad(s % 60);
+  }
+
   const MIN_ZOOM = 1, MAX_ZOOM = 6;
   function clampPan() {
     const half = 0.5 / zoom;
@@ -74,6 +81,8 @@
       draw($("nCanvas"), $("nxt"), page + 1);
       $("notes").textContent = notes[page - 1] || "";
       $("counter").textContent = pdf ? `${page} / ${pdf.numPages}` : "– / –";
+      const budget = durations[page - 1] || 0;
+      $("slideBudget").textContent = budget > 0 ? `/ ${fmtDur(budget)}` : "";
       $("btnBlank").style.borderColor = blank ? "var(--acc)" : "";
       $("btnZoomReset").textContent = `Zoom ${Math.round(zoom * 100)}%`;
       $("cur").classList.toggle("zoomable", zoom === 1);
@@ -361,11 +370,6 @@
     $("btnOverview").onclick = openOverview;
     $("overviewClose").onclick = closeOverview;
     $("overview").addEventListener("click", (e) => { if (e.target.id === "overview") closeOverview(); });
-    function fmtDur(s) {
-      if (s == null) return "–";
-      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-      return (h ? h + ":" : "") + pad(m) + ":" + pad(s % 60);
-    }
     function refreshHistory() {
       if ($("history").style.display !== "flex") return;
       const body = $("historyBody");
@@ -455,7 +459,6 @@
     const applySize = () => document.documentElement.style.setProperty("--notes-size", size + "px");
     $("btnNotesPlus").onclick = (e) => { e.stopPropagation(); size = Math.min(48, size + 2); applySize(); };
     $("btnNotesMinus").onclick = (e) => { e.stopPropagation(); size = Math.max(12, size - 2); applySize(); };
-    const pad = (n) => String(n).padStart(2, "0");
     function colorForRatio(ratio) {
       // 0 -> green (120deg), 0.75 -> yellow (60deg), >=1 -> red (0deg)
       let hue;
